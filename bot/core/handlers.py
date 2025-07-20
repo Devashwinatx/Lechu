@@ -16,17 +16,21 @@ from bot.modules import (
     arg_usage,
     ask_ai,
     authorize,
+    auto_forward_handler,
+    ban_command,
     bot_help,
     bot_stats,
     cancel,
     cancel_all_buttons,
     cancel_all_update,
+    cancel_forward_callback,
     cancel_multi,
     check_scheduled_deletions,
     clear,
     clone_node,
     confirm_restart,
     confirm_selection,
+    contact_command,
     count_node,
     decode_command,
     delete_file,
@@ -38,8 +42,12 @@ from bot.modules import (
     encode_command,
     encoding_callback,
     execute,
+    file2link_command,
+    finish_pagination_callback,
     font_styles_cmd,
     force_delete_all_messages,
+    forward_batch_callback,
+    forward_command,
     gdrive_search,
     gen_session,
     get_rss_menu,
@@ -72,9 +80,17 @@ from bot.modules import (
     media_tools_settings,
     mediainfo,
     mirror,
+    mode_batch_callback,
+    mode_direct_callback,
+    neko_callback_handler,
+    neko_command,
+    next_batch_callback,
     nzb_leech,
     nzb_mirror,
+    osint_callback_handler,
+    osint_command,
     paste_text,
+    phish_check_command,
     ping,
     quickinfo_callback,
     # QuickInfo imports
@@ -94,14 +110,19 @@ from bot.modules import (
     start,
     status_pages,
     task_status,
+    tmdb_callback_handler,
+    tmdb_search_command,
     tool_command,
     torrent_search,
     torrent_search_update,
+    trace_command,
     truecaller_lookup,
     unauthorize,
+    unban_command,
     virustotal_scan,
     whisper_callback,
     whisper_command,
+    wot_command,
     ytdl,
     ytdl_leech,
 )
@@ -319,6 +340,11 @@ def add_handlers():
             BotCommands.BroadcastCommand,
             CustomFilters.owner,
         ),
+        "forward": (
+            forward_command,
+            BotCommands.ForwardCommand,
+            CustomFilters.sudo,
+        ),
         "nzb_mirror": (
             nzb_mirror,
             BotCommands.NzbMirrorCommand,
@@ -343,6 +369,11 @@ def add_handlers():
         "imdb_search": (
             imdb_search,
             BotCommands.IMDBCommand,
+            CustomFilters.authorized,
+        ),
+        "tmdb_search": (
+            tmdb_search_command,
+            BotCommands.TMDBCommand,
             CustomFilters.authorized,
         ),
         "login": (
@@ -377,6 +408,11 @@ def add_handlers():
             BotCommands.AskCommand,
             CustomFilters.authorized,
         ),
+        "osint": (
+            osint_command,
+            BotCommands.OSINTCommand,
+            CustomFilters.sudo,
+        ),
         "paste": (
             paste_text,
             BotCommands.PasteCommand,
@@ -385,6 +421,11 @@ def add_handlers():
         "virustotal": (
             virustotal_scan,
             BotCommands.VirusTotalCommand,
+            CustomFilters.authorized,
+        ),
+        "neko": (
+            neko_command,
+            BotCommands.NekoCommand,
             CustomFilters.authorized,
         ),
         # QuickInfo commands
@@ -404,6 +445,29 @@ def add_handlers():
             tool_command,
             BotCommands.ToolCommand,
             CustomFilters.authorized,
+        ),
+        # Trace.moe commands
+        "trace": (
+            trace_command,
+            BotCommands.TraceCommand,
+            CustomFilters.authorized,
+        ),
+        # Contact commands - available to all users
+        "contact": (
+            contact_command,
+            BotCommands.ContactCommand,
+            None,  # No filter - available to all users
+        ),
+        # Ban/Unban commands - sudo only
+        "ban": (
+            ban_command,
+            BotCommands.BanCommand,
+            CustomFilters.sudo,
+        ),
+        "unban": (
+            unban_command,
+            BotCommands.UnbanCommand,
+            CustomFilters.sudo,
         ),
     }
 
@@ -507,6 +571,39 @@ def add_handlers():
         # Add MEGA search handlers to command_filters
         command_filters.update(mega_search_handlers)
 
+    # Add File2Link handler if enabled
+    if Config.FILE2LINK_ENABLED:
+        file2link_handlers = {
+            "file2link": (
+                file2link_command,
+                BotCommands.File2LinkCommand,
+                CustomFilters.authorized,
+            ),
+        }
+        command_filters.update(file2link_handlers)
+
+    # Add Phish Directory handler if enabled
+    if Config.PHISH_DIRECTORY_ENABLED:
+        phishcheck_handlers = {
+            "phishcheck": (
+                phish_check_command,
+                BotCommands.PhishCheckCommand,
+                CustomFilters.authorized,
+            ),
+        }
+        command_filters.update(phishcheck_handlers)
+
+    # Add WOT handler if enabled
+    if Config.WOT_ENABLED:
+        wot_handlers = {
+            "wot": (
+                wot_command,
+                BotCommands.WotCommand,
+                CustomFilters.authorized,
+            ),
+        }
+        command_filters.update(wot_handlers)
+
     # Add encoding/decoding handlers if enabled
     if Config.ENCODING_ENABLED:
         encoding_handlers = {
@@ -558,8 +655,10 @@ def add_handlers():
         "^botrestart": confirm_restart,
         "^aeon": aeon_callback,
         "^imdb": imdb_callback,
+        "^tmdb": tmdb_callback_handler,
         "^medget": media_get_callback,
         "^medcancel": media_cancel_callback,
+        "^neko_": neko_callback_handler,
         "delete_pending": delete_pending_messages,
         "force_delete_all": force_delete_all_messages,
     }
@@ -574,6 +673,7 @@ def add_handlers():
         "^gensession$": gen_session,  # Allow session generation for all users
         "^quickinfo_": quickinfo_callback,  # QuickInfo callbacks
         "^whisper_": whisper_callback,  # Whisper message callbacks
+        "^osint_": osint_callback_handler,  # OSINT menu callbacks
     }
 
     # Add encoding/decoding callback handlers if enabled
@@ -588,7 +688,7 @@ def add_handlers():
 
     # Add Zotify quality selector callback handler if enabled
     if Config.ZOTIFY_ENABLED:
-        from bot.helper.zotify_utils.quality_selector import (
+        from bot.helper.mirror_leech_utils.zotify_utils.quality_selector import (
             ZotifyQualitySelector,
             get_active_zotify_quality_selector,
         )
@@ -604,7 +704,9 @@ def add_handlers():
 
     # Add MEGA callback handlers if enabled
     if Config.MEGA_ENABLED:
-        from bot.helper.mega_utils.folder_selector import mega_folder_callback
+        from bot.helper.mirror_leech_utils.mega_utils.folder_selector import (
+            mega_folder_callback,
+        )
 
         # MEGA search now uses Telegraph (no pagination callbacks needed)
         public_regex_filters["^mgq"] = mega_folder_callback
@@ -632,6 +734,56 @@ def add_handlers():
             ),
             group=0,
         )
+
+    # Add forward pagination callback handlers
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            cancel_forward_callback,
+            filters=regex(r"^cancel_forward_\d+$") & CustomFilters.sudo,
+        ),
+        group=0,
+    )
+
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            next_batch_callback,
+            filters=regex(r"^next_batch_\d+$") & CustomFilters.sudo,
+        ),
+        group=0,
+    )
+
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            forward_batch_callback,
+            filters=regex(r"^forward_batch_\d+$") & CustomFilters.sudo,
+        ),
+        group=0,
+    )
+
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            finish_pagination_callback,
+            filters=regex(r"^finish_pagination_\d+$") & CustomFilters.sudo,
+        ),
+        group=0,
+    )
+
+    # Add mode selection callback handlers
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            mode_batch_callback,
+            filters=regex(r"^mode_batch_\d+$") & CustomFilters.sudo,
+        ),
+        group=0,
+    )
+
+    TgClient.bot.add_handler(
+        CallbackQueryHandler(
+            mode_direct_callback,
+            filters=regex(r"^mode_direct_\d+$") & CustomFilters.sudo,
+        ),
+        group=0,
+    )
 
     TgClient.bot.add_handler(
         EditedMessageHandler(
@@ -738,6 +890,7 @@ def add_handlers():
         "check_deletions",
         "cd",
         "imdb",
+        "tmdb",
         "login",
         "mediasearch",
         "mds",
@@ -764,7 +917,8 @@ def add_handlers():
         "mgs",
         "quickinfo",
         "qi",
-        # file2link, f2l, streamstats, sstats, index removed - functionality disabled
+        "file2link",
+        "f2l",
         "tool",
         "t",
     ]
@@ -774,6 +928,14 @@ def add_handlers():
         base_commands.extend(["encode", "enc"])
     if Config.DECODING_ENABLED:
         base_commands.extend(["decode", "dec"])
+
+    # Add trace.moe command if enabled
+    if Config.TRACE_MOE_ENABLED:
+        base_commands.extend(["trace"])
+
+    # Add phishcheck command if enabled
+    if Config.PHISH_DIRECTORY_ENABLED:
+        base_commands.extend(["phishcheck"])
 
     # Build the regex pattern
     commands_pattern = "|".join(base_commands)
@@ -982,3 +1144,13 @@ def add_handlers():
         ),
         group=2,  # Lower priority to not interfere with commands
     )
+
+    # Add auto-forward handler for configured source chats
+    if Config.FORWARD_SOURCE and Config.FORWARD_DESTINATION:
+        TgClient.bot.add_handler(
+            MessageHandler(
+                auto_forward_handler,
+                filters=filters.all,  # Listen to all messages
+            ),
+            group=3,  # Lower priority to not interfere with commands
+        )

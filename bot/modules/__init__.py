@@ -16,6 +16,7 @@ from .check_deletion import (
     force_delete_all_messages,
 )
 from .clone import clone_node
+from .contact import ban_command, contact_command, unban_command
 from .encoding import (
     decode_command,
     encode_command,
@@ -25,11 +26,22 @@ from .encoding import (
     list_methods_command,
 )
 from .exec import aioexecute, clear, execute
-from .file_selector import confirm_selection, select
 
-# file_to_link module removed - streaming functionality disabled
+# File2Link module for streaming functionality
+from .file2link import file2link_command
+from .file_selector import confirm_selection, select
 from .font_styles import font_styles_cmd
 from .force_start import remove_from_queue
+from .forward import (
+    auto_forward_handler,
+    cancel_forward_callback,
+    finish_pagination_callback,
+    forward_batch_callback,
+    forward_command,
+    mode_batch_callback,
+    mode_direct_callback,
+    next_batch_callback,
+)
 from .gallery_dl import gdl_leech, gdl_mirror
 from .gd_count import count_node
 from .gd_delete import delete_file
@@ -62,12 +74,15 @@ from .mirror_leech import (
     nzb_leech,
     nzb_mirror,
 )
+from .neko import neko_callback_handler, neko_command
 from .nsfw_management import (
     nsfw_stats_command,
     nsfw_test_command,
 )
 from .nzb_search import hydra_search
+from .osint import osint_callback_handler, osint_command
 from .paste import paste_text
+from .phish_check import phish_check_command
 from .quickinfo import (
     handle_forwarded_message,
     handle_shared_entities,
@@ -88,7 +103,9 @@ from .sox import spectrum_handler
 from .speedtest import speedtest
 from .stats import bot_stats, get_packages_version
 from .status import status_pages, task_status
+from .tmdb import tmdb_callback_handler, tmdb_search_command
 from .tool_commands import tool_command
+from .trace_moe import trace_command
 from .truecaller import truecaller_lookup
 from .users_settings import (
     edit_user_settings,
@@ -97,6 +114,7 @@ from .users_settings import (
 )
 from .virustotal import virustotal_scan
 from .whisper import whisper_callback, whisper_command
+from .wot import wot_command
 from .wrong_cmds import handle_no_suffix_commands, handle_qb_commands
 from .ytdlp import ytdl, ytdl_leech
 from .zotify import zotify_leech, zotify_mirror, zotify_search
@@ -108,6 +126,8 @@ __all__ = [
     "arg_usage",
     "ask_ai",
     "authorize",
+    "auto_forward_handler",
+    "ban_command",
     "bot_help",
     "bot_stats",
     "broadcast",
@@ -115,12 +135,14 @@ __all__ = [
     "cancel",
     "cancel_all_buttons",
     "cancel_all_update",
+    "cancel_forward_callback",
     "cancel_multi",
     "check_scheduled_deletions",
     "clear",
     "clone_node",
     "confirm_restart",
     "confirm_selection",
+    "contact_command",
     "count_node",
     "decode_command",
     "delete_file",
@@ -133,9 +155,12 @@ __all__ = [
     "encoding_callback",
     "encoding_help_command",
     "execute",
-    # File-to-Link functions removed - streaming disabled
+    "file2link_command",
+    "finish_pagination_callback",
     "font_styles_cmd",
     "force_delete_all_messages",
+    "forward_batch_callback",
+    "forward_command",
     "gdl_leech",
     "gdl_mirror",
     "gdrive_search",
@@ -174,9 +199,17 @@ __all__ = [
     "media_tools_settings",
     "mediainfo",
     "mirror",
+    "mode_batch_callback",
+    "mode_direct_callback",
+    "neko_callback_handler",
+    "neko_command",
+    "next_batch_callback",
     "nzb_leech",
     "nzb_mirror",
+    "osint_callback_handler",
+    "osint_command",
     "paste_text",
+    "phish_check_command",
     "ping",
     "quickinfo_callback",
     # QuickInfo functions
@@ -198,12 +231,17 @@ __all__ = [
     "status_pages",
     # "stream_stats_command" removed - streaming disabled
     "task_status",
+    "tmdb_callback_handler",
+    "tmdb_search_command",
     "tool_command",
     "torrent_search",
     "torrent_search_update",
+    "trace_command",
     "truecaller_lookup",
     "unauthorize",
+    "unban_command",
     "virustotal_scan",
+    "wot_command",
     "ytdl",
     "ytdl_leech",
     "zotify_leech",
