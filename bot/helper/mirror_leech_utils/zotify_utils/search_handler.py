@@ -6,10 +6,8 @@ import asyncio
 import contextlib
 import time as time_module
 
-# Optimized in-memory cache for search results with LRU eviction
-from collections import OrderedDict
+# Lightweight cache for search results
 from functools import partial
-from time import time
 from typing import Any
 
 from pyrogram import filters as pyrogram_filters
@@ -27,7 +25,6 @@ from bot import LOGGER
 from bot.core.aeon_client import TgClient
 from bot.core.config_manager import Config
 from bot.helper.ext_utils.status_utils import get_readable_time
-from bot.helper.mirror_leech_utils.zotify_utils.zotify_config import zotify_config
 from bot.helper.telegram_helper.button_build import ButtonMaker
 from bot.helper.telegram_helper.message_utils import (
     auto_delete_message,
@@ -36,19 +33,19 @@ from bot.helper.telegram_helper.message_utils import (
     send_message,
 )
 
-_search_cache = OrderedDict()
+# Reduced cache sizes for memory optimization
+_search_cache = {}
 _cache_timestamps = {}
-CACHE_DURATION = 300  # 5 minutes cache
-MAX_CACHE_ENTRIES = 100  # Increased for better hit rate
+CACHE_DURATION = 180  # Reduced to 3 minutes
+MAX_CACHE_ENTRIES = 30  # Significantly reduced
 _thumbnail_cache = {}  # Separate cache for thumbnails
+MAX_THUMBNAIL_CACHE = 15  # Limit thumbnail cache
 
 
 def _get_search_cache(key: str):
-    """Get cached search result if still valid with LRU update"""
+    """Get cached search result if still valid"""
     if key in _search_cache and key in _cache_timestamps:
         if time_module.time() - _cache_timestamps[key] < CACHE_DURATION:
-            # Move to end (most recently used)
-            _search_cache.move_to_end(key)
             return _search_cache[key]
         # Remove expired cache
         del _search_cache[key]
@@ -81,7 +78,7 @@ def _get_thumbnail_cache(key: str):
 def _set_thumbnail_cache(key: str, url: str):
     """Set thumbnail URL in cache"""
     # Limit thumbnail cache size
-    if len(_thumbnail_cache) > 200:
+    if len(_thumbnail_cache) >= MAX_THUMBNAIL_CACHE:
         # Remove oldest 50 entries
         sorted_items = sorted(_thumbnail_cache.items(), key=lambda x: x[1][0])
         for old_key, _ in sorted_items[:50]:
@@ -91,76 +88,25 @@ def _set_thumbnail_cache(key: str, url: str):
 
 
 class ZotifySearchHandler:
-    """Handles Zotify search operations"""
+    """Handles Zotify search operations using the simple session manager"""
 
     def __init__(self):
-        self._session = None
-        self._search_cache = {}
-        self._session_cache_time = 0
-        self._session_cache_expiry = 600  # 10 minutes - same as streamrip
+        # Use the global simple session manager
+        from bot.helper.mirror_leech_utils.zotify_utils.improved_session_manager import (
+            simple_session_manager,
+        )
+
+        self.session_manager = simple_session_manager
 
     async def get_session(self) -> Session | None:
-        """Get or create Zotify session with caching"""
-        current_time = time_module.time()
-
-        # Check if cached session is still valid
-        if (
-            self._session
-            and current_time - self._session_cache_time < self._session_cache_expiry
-        ):
-            # Validate session is still working
-            try:
-                # Quick validation - try to access session properties
-                if hasattr(self._session, "api") and self._session.api:
-                    return self._session
-                LOGGER.warning("Cached session appears invalid, recreating...")
-                self._session = None
-            except Exception as e:
-                LOGGER.warning(f"Session validation failed, recreating: {e}")
-                self._session = None
-
-        try:
-            auth_method = zotify_config.get_auth_method()
-
-            if auth_method == "file":
-                # Suppress librespot core logs for cleaner output
-                import logging
-
-                librespot_logger = logging.getLogger("librespot.core")
-                original_level = librespot_logger.level
-                librespot_logger.setLevel(
-                    logging.WARNING
-                )  # Only show warnings and errors
-
-                try:
-                    self._session = Session.from_file(
-                        zotify_config.get_credentials_path(),
-                        zotify_config.get_download_config()["language"],
-                    )
-                finally:
-                    # Restore original logging level
-                    librespot_logger.setLevel(original_level)
-                # Cache the session creation time
-                self._session_cache_time = current_time
-
-            else:
-                # Interactive authentication - will need to be handled separately
-                # For now, return None to indicate authentication is needed
-                return None
-
-            return self._session
-
-        except Exception as e:
-            LOGGER.error(f"Failed to create Zotify session: {e}")
-            # Clear any invalid session
-            self._session = None
-            return None
+        """Get session from the simple session manager"""
+        return await self.session_manager.get_session()
 
     async def search_music(
         self, query: str, categories: list[str] | None = None
     ) -> dict[str, list[dict]]:
         """
-        Search for music on Spotify with enhanced free account support
+        Search for music on Spotify using the simple session manager
 
         Args:
             query: Search query
@@ -169,96 +115,18 @@ class ZotifySearchHandler:
         Returns:
             Dictionary with search results by category
         """
-        if not categories:
-            categories = ["track", "album", "playlist", "artist"]
-
-        session = await self.get_session()
-        if not session:
-            return {}
-
         try:
-            # Use Zotify's ApiClient for search via Spotify Web API
-            api = session.api()
+            # Use the simple session manager for search
+            results = await self.session_manager.search(query, categories)
 
-            # Check account type for optimization
-            try:
-                user_info = api.invoke_url("me")
-                account_type = user_info.get("product", "unknown")
-                is_free_account = account_type == "free"
-            except Exception:
-                is_free_account = True  # Assume free account if check fails
+            # Format results for compatibility
+            formatted_results = {}
+            for category, items in results.items():
+                formatted_results[category] = await self._format_search_results(
+                    items, category
+                )
 
-            # Perform search for each category with free account optimizations
-            results = {}
-            max_results = (
-                5 if is_free_account else 10
-            )  # Reduced limit for free accounts
-
-            for category in categories:
-                try:
-                    # Apply rate limiting for free accounts
-                    if is_free_account:
-                        session.rate_limiter.apply_limit()
-
-                    # Use Zotify's exact API method for search
-                    search_endpoint = (
-                        f"search?q={query}&type={category}&limit={max_results}"
-                    )
-
-                    # Add timeout and retry logic for free accounts
-                    category_results = None
-                    max_retries = 3 if is_free_account else 1
-
-                    for attempt in range(max_retries):
-                        try:
-                            # Remove timeout - let search complete naturally
-                            category_results = (
-                                await asyncio.get_event_loop().run_in_executor(
-                                    None,
-                                    lambda endpoint=search_endpoint: api.invoke_url(
-                                        endpoint
-                                    ),
-                                )
-                            )
-                            break  # Success, exit retry loop
-                        except Exception as e:
-                            if attempt < max_retries - 1:
-                                LOGGER.warning(
-                                    f"Search error attempt {attempt + 1} for {category}, retrying: {e}"
-                                )
-                                await asyncio.sleep(
-                                    0.5
-                                )  # Shorter delay for other errors
-                            else:
-                                LOGGER.error(
-                                    f"Search failed for category {category} after {max_retries} attempts: {e}"
-                                )
-                                category_results = None
-
-                    if category_results and f"{category}s" in category_results:
-                        items = category_results[f"{category}s"]["items"]
-                        # Validate that items is a list
-                        if isinstance(items, list):
-                            results[category] = await self._format_search_results(
-                                items, category
-                            )
-                        else:
-                            LOGGER.warning(
-                                f"Invalid items type for category {category}: {type(items)}"
-                            )
-                            results[category] = []
-                    else:
-                        results[category] = []
-
-                    # Add delay between searches for free accounts
-                    if is_free_account and len(categories) > 1:
-                        await asyncio.sleep(0.5)
-
-                except Exception as e:
-                    LOGGER.error(f"Search failed for category {category}: {e}")
-                    results[category] = []
-
-            return results
+            return formatted_results
 
         except Exception as e:
             LOGGER.error(f"Zotify search failed: {e}")
@@ -455,8 +323,21 @@ class ZotifySearchHandler:
         return message
 
 
-# Global instance
+# Global instance with session limit
 zotify_search = ZotifySearchHandler()
+
+
+# Simple cleanup function
+async def cleanup_sessions():
+    """Clean up sessions"""
+    try:
+        from bot.helper.mirror_leech_utils.zotify_utils.improved_session_manager import (
+            simple_session_manager,
+        )
+
+        await simple_session_manager.close()
+    except Exception as e:
+        LOGGER.warning(f"Session cleanup error: {e}")
 
 
 class ZotifySearchInterface:
@@ -482,7 +363,7 @@ class ZotifySearchInterface:
         self.current_page = 0
         self.results_per_page = 5  # Same as StreamRip
         self._reply_to = None
-        self._time = time()
+        self._time = time_module.time()
         self._timeout = 300  # 5 minutes for search
         self.event = asyncio.Event()
         self.selected_result = None
@@ -793,7 +674,7 @@ class ZotifySearchInterface:
         # Add cancel button
         buttons.data_button("❌ Cancel", "zs cancel", "footer")
 
-        msg += f"⏱️ <b>Timeout:</b> <code>{get_readable_time(self._timeout - (time() - self._time))}</code>"
+        msg += f"⏱️ <b>Timeout:</b> <code>{get_readable_time(self._timeout - (time_module.time() - self._time))}</code>"
 
         # Send or edit message
         if self._reply_to:
@@ -921,7 +802,11 @@ async def search_music(
     query: str, categories: list[str] | None = None
 ) -> dict[str, list[dict]]:
     """Search for music using Zotify"""
-    return await zotify_search.search_music(query, categories)
+    try:
+        return await zotify_search.search_music(query, categories)
+    except Exception as e:
+        LOGGER.error(f"Zotify search failed: {e}")
+        return {}
 
 
 async def search_music_auto_first(query: str) -> str | None:
@@ -952,14 +837,13 @@ async def perform_inline_zotify_search(
     query: str, media_type: str | None = None, user_id: int | None = None
 ) -> list[dict]:
     """Perform Zotify search for inline queries with optimized performance and no timeouts"""
-    time_module.time()
+    # Performance tracking removed for optimization
 
     try:
         # Check cache first for faster responses
         cache_key = f"zotify_search_{query}_{media_type}"
         cached_result = _get_search_cache(cache_key)
         if cached_result is not None:
-            LOGGER.debug(f"Using cached Zotify search result for: {query}")
             return cached_result
 
         # Initialize Zotify on-demand

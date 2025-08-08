@@ -6,12 +6,20 @@ from time import time as get_time
 
 from cachetools import TTLCache
 from pyrogram import Client, enums
-from pyrogram.errors import (
-    FloodPremiumWait,
-    FloodWait,
-    MessageEmpty,
-    MessageNotModified,
-)
+
+# Smart import for FloodPremiumWait compatibility
+try:
+    from pyrogram.errors import (
+        FloodPremiumWait,
+        FloodWait,
+        MessageEmpty,
+        MessageNotModified,
+    )
+except ImportError:
+    # FloodPremiumWait not available in pyrofork 2.2.11, use FloodWait as fallback
+    from pyrogram.errors import FloodWait, MessageEmpty, MessageNotModified
+
+    FloodPremiumWait = FloodWait  # Use FloodWait as fallback
 from pyrogram.types import InputMediaPhoto
 
 from bot import (
@@ -74,6 +82,7 @@ async def send_message(
     markdown=False,
     block=True,
     bot_client=None,
+    is_ai_message=False,
 ):
     """Send a message using the specified bot client
 
@@ -85,6 +94,7 @@ async def send_message(
         markdown: Whether to use Markdown formatting
         block: Whether to block until the message is sent
         bot_client: Bot client to use for sending (default: main bot)
+        is_ai_message: Whether this is an AI-generated message (skips truncation)
     """
     parse_mode = enums.ParseMode.MARKDOWN if markdown else enums.ParseMode.HTML
 
@@ -101,17 +111,30 @@ async def send_message(
     if len(text) > max_length:
         # Check if message contains expandable blockquotes
         if "<blockquote expandable=" not in text:
-            # Truncate the message and add a note
-            text = (
-                text[: max_length - 100]
-                + "\n\n<i>... (message truncated due to length)</i>"
-            )
+            if not is_ai_message:
+                # Truncate non-AI messages as before
+                text = (
+                    text[: max_length - 100]
+                    + "\n\n<i>... (message truncated due to length)</i>"
+                )
+            else:
+                # For AI messages, log warning but don't truncate - let AI module handle splitting
+                LOGGER.warning(
+                    f"AI message length {len(text)} exceeds limit {max_length}. Should be split by AI module."
+                )
         else:
             # If it has expandable blockquotes, let Telegram handle it
             pass
 
     # Use the specified bot client or default to the main bot
     client = bot_client or TgClient.bot
+
+    # Check if client is available
+    if not client:
+        LOGGER.warning(
+            "No client available for sending message. This is normal during restart."
+        )
+        return "Client not available"
 
     # Handle None message object
     if message is None:
@@ -149,9 +172,11 @@ async def send_message(
             return f"Invalid message object: {type(message)}"
 
         if photo:
+            # Check if message has id attribute before using it
+            reply_to_message_id = message.id if hasattr(message, "id") else None
             return await message.reply_photo(
                 photo=photo,
-                reply_to_message_id=message.id,
+                reply_to_message_id=reply_to_message_id,
                 caption=text,
                 reply_markup=buttons,
                 disable_notification=True,
@@ -183,8 +208,13 @@ async def send_message(
         )
     except Exception as e:
         error_str = str(e)
+        # Handle client not started errors gracefully (during restart)
+        if "Client has not been started yet" in error_str:
+            LOGGER.warning(
+                f"Client not started for sending message. This is normal during restart: {error_str}"
+            )
         # Don't log UserIsBlocked and InputUserDeactivated as errors since they're handled by callers
-        if not (
+        elif not (
             "USER_IS_BLOCKED" in error_str or "INPUT_USER_DEACTIVATED" in error_str
         ):
             LOGGER.error(error_str)
@@ -198,6 +228,7 @@ async def edit_message(
     photo=None,
     markdown=False,
     block=True,
+    is_ai_message=False,
 ):
     # Check if message is valid
     if not message or not hasattr(message, "chat") or not hasattr(message, "id"):
@@ -218,11 +249,17 @@ async def edit_message(
     if len(text) > max_length:
         # Check if message contains expandable blockquotes
         if "<blockquote expandable=" not in text:
-            # Truncate the message and add a note
-            text = (
-                text[: max_length - 100]
-                + "\n\n<i>... (message truncated due to length)</i>"
-            )
+            if not is_ai_message:
+                # Truncate non-AI messages as before
+                text = (
+                    text[: max_length - 100]
+                    + "\n\n<i>... (message truncated due to length)</i>"
+                )
+            else:
+                # For AI messages, log warning but don't truncate - let AI module handle splitting
+                LOGGER.warning(
+                    f"AI edit message length {len(text)} exceeds limit {max_length}. Should be split by AI module."
+                )
         else:
             # If it has expandable blockquotes, let Telegram handle it
             pass
@@ -234,6 +271,27 @@ async def edit_message(
 
         if not chat_id or not message_id:
             return "Message has invalid chat_id or message_id"
+
+        # Check if the client is still available before attempting edit
+        client_available = False
+        if hasattr(message, "_client") and message._client:
+            # Check if the client is still started
+            try:
+                client_available = message._client.is_connected
+            except AttributeError:
+                # Fallback: check if TgClient instances are available
+                client_available = (
+                    TgClient.bot is not None or TgClient.user is not None
+                )
+        else:
+            # Fallback: check if TgClient instances are available
+            client_available = TgClient.bot is not None or TgClient.user is not None
+
+        if not client_available:
+            LOGGER.warning(
+                f"Client not available for editing message {message_id} in chat {chat_id}. Skipping edit."
+            )
+            return "Client not available"
 
         # Handle case where buttons is None (could happen if build_menu returns None)
         if buttons is None:
@@ -300,6 +358,11 @@ async def edit_message(
                 return message
             except Exception as e2:
                 LOGGER.error(f"Failed to edit message without buttons: {e2!s}")
+        # Handle client not started errors gracefully (during restart)
+        elif "Client has not been started yet" in error_str:
+            LOGGER.warning(
+                f"Client not started for editing message. This is normal during restart: {error_str}"
+            )
         # Only log at debug level for common Telegram API errors
         elif (
             "MESSAGE_ID_INVALID" in error_str
@@ -418,6 +481,34 @@ async def delete_message(*args):
                     )
                 continue
 
+            # Check if the client is still available before attempting deletion
+            client_available = False
+            if hasattr(msg, "_client") and msg._client:
+                # Check if the client is still started
+                try:
+                    client_available = msg._client.is_connected
+                except AttributeError:
+                    # Fallback: check if TgClient instances are available
+                    client_available = (
+                        TgClient.bot is not None or TgClient.user is not None
+                    )
+            else:
+                # Fallback: check if TgClient instances are available
+                client_available = (
+                    TgClient.bot is not None or TgClient.user is not None
+                )
+
+            if not client_available:
+                LOGGER.warning(
+                    f"Client not available for deleting message {msg.id} in chat {msg.chat.id}. Skipping deletion."
+                )
+                # Remove from database since we can't delete it
+                try:
+                    await database.remove_scheduled_deletion(msg.chat.id, msg.id)
+                except Exception as e:
+                    LOGGER.error(f"Error removing scheduled deletion: {e}")
+                continue
+
             msgs.append(create_task(msg.delete()))
             # Remove from database if it exists
             try:
@@ -442,8 +533,20 @@ async def delete_message(*args):
                 continue
 
             error_str = str(result)
+            # Handle client not started errors gracefully (during restart)
+            if "Client has not been started yet" in error_str:
+                LOGGER.warning(
+                    f"Client not started for deleting message {msg.id} in chat {msg.chat.id}. This is normal during restart."
+                )
+                # Remove from database since we can't delete it
+                try:
+                    await database.remove_scheduled_deletion(msg.chat.id, msg.id)
+                except Exception as e:
+                    LOGGER.error(
+                        f"Error removing scheduled deletion for client not started: {e}"
+                    )
             # Handle permission-related errors more gracefully
-            if "MESSAGE_DELETE_FORBIDDEN" in error_str or "403" in error_str:
+            elif "MESSAGE_DELETE_FORBIDDEN" in error_str or "403" in error_str:
                 LOGGER.warning(
                     f"Cannot delete message {msg.id} in chat {msg.chat.id}: {error_str}"
                 )

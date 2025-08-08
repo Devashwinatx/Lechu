@@ -88,10 +88,10 @@ async def generate_stream_links(
         enc_fname = quote(m_name)
         f_hash = get_hash(message)
 
-        # Generate download link (always available)
-        download_link = f"{base_url}/stream/{f_hash}{fid}/{enc_fname}"
+        # Generate download link (always available) - uses /download/ endpoint for actual downloading
+        download_link = f"{base_url}/download/{f_hash}{fid}/{enc_fname}"
 
-        # Generate stream link only if file is streamable
+        # Generate stream link only if file is streamable - uses /stream/ endpoint for streaming
         stream_link = None
         if is_streamable_file(message):
             stream_link = f"{base_url}/watch/{f_hash}{fid}/{enc_fname}"

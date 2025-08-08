@@ -1,3 +1,4 @@
+from bot import LOGGER
 from bot.helper.ext_utils.status_utils import (
     MirrorStatus,
     get_readable_file_size,
@@ -38,8 +39,17 @@ class TelegramStatus:
             current_filename = os.path.basename(self._obj._up_path)
             if current_filename:
                 return current_filename
-        # Otherwise use the original name
-        return self.listener.name
+        # Otherwise use the original name, with subname fallback
+        listener_name = self.listener.name
+
+        # For operations where main name might be empty, use subname if available
+        if (
+            (not listener_name or listener_name.strip() == "")
+            and hasattr(self.listener, "subname")
+            and self.listener.subname
+        ):
+            return self.listener.subname
+        return listener_name
 
     def progress(self):
         try:
@@ -62,4 +72,19 @@ class TelegramStatus:
         return self._gid
 
     def task(self):
-        return self._obj
+        return self
+
+    async def cancel_task(self):
+        """Cancel the telegram upload task"""
+        self.listener.is_cancelled = True
+
+        # Let the actual uploader handle the cancellation and error messages
+        # This prevents duplicate error messages
+        if hasattr(self._obj, "cancel_task"):
+            await self._obj.cancel_task()
+        # Fallback for older implementations
+        elif hasattr(self._obj, "_listener"):
+            self._obj._listener.is_cancelled = True
+            # Only show error message if the actual uploader doesn't handle it
+            LOGGER.info(f"Cancelling Telegram Upload: {self.name()}")
+            await self.listener.on_upload_error("Upload stopped by user!")

@@ -5358,6 +5358,20 @@ class TaskConfig:
         return dl_path
 
     async def substitute(self, dl_path):
+        def validate_regex_pattern(pattern):
+            """Validate and fix regex patterns to prevent FutureWarnings"""
+            try:
+                import re
+
+                # Test compile the pattern to check for issues
+                re.compile(pattern)
+                return pattern
+            except re.error:
+                return re.escape(pattern)
+            except Exception:
+                # For any other issues, escape the pattern
+                return re.escape(pattern)
+
         def perform_substitution(name, substitutions):
             for substitution in substitutions:
                 sen = False
@@ -5372,13 +5386,26 @@ class TaskConfig:
                         res = substitution[1]
                 else:
                     res = ""
+
+                # Validate and fix the regex pattern
+                pattern = validate_regex_pattern(pattern)
+
                 try:
-                    name = sub(
-                        rf"{pattern}",
-                        res,
-                        name,
-                        flags=IGNORECASE if sen else 0,
-                    )
+                    import warnings
+
+                    # Suppress FutureWarning for nested sets in regex patterns
+                    with warnings.catch_warnings():
+                        warnings.filterwarnings(
+                            "ignore",
+                            category=FutureWarning,
+                            message=".*nested set.*",
+                        )
+                        name = sub(
+                            rf"{pattern}",
+                            res,
+                            name,
+                            flags=IGNORECASE if sen else 0,
+                        )
                 except Exception:
                     return False
                 if len(name.encode()) > 255:
@@ -9681,7 +9708,17 @@ class TaskConfig:
             ffmpeg = FFMpeg(self)
             async with task_dict_lock:
                 task_dict[self.mid] = FFmpegStatus(self, ffmpeg, gid, "Split")
-            LOGGER.info(f"Splitting: {self.name}")
+            # Use the actual file name being split if self.name is empty
+            split_name = (
+                self.name
+                if self.name and self.name.strip()
+                else (
+                    ospath.basename(next(iter(self.files_to_proceed.keys())))
+                    if self.files_to_proceed
+                    else "Unknown"
+                )
+            )
+            LOGGER.info(f"Splitting: {split_name}")
             for f_path, (f_size, file_) in self.files_to_proceed.items():
                 self.proceed_count += 1
                 if self.is_file:
@@ -9713,12 +9750,10 @@ class TaskConfig:
                         f"Regular Split: File will be split into {parts} parts of {split_size / (1024 * 1024):.1f} MiB each"
                     )
 
-                # For leech operations, always use simple file splitting regardless of file type
-                # FFmpeg split is complex and should only be used for specific video processing tasks
-                if self.is_leech:
-                    self.progress = False
-                    res = await split_file(f_path, split_size, self)
-                elif not self.as_doc and (await get_document_type(f_path))[0]:
+                # Use the old Aeon-MLTB splitting logic:
+                # - FFmpeg splitting for media files (maintains duration and streaming)
+                # - Simple file splitting for documents and non-media files
+                if not self.as_doc and (await get_document_type(f_path))[0]:
                     self.progress = True
                     res = await ffmpeg.split(f_path, file_, parts, split_size)
                 else:
@@ -11017,29 +11052,43 @@ class TaskConfig:
 
         # Determine the source of the settings for detailed logging
         {
-            "text": "user"
-            if self.user_dict.get("WATERMARK_KEY")
-            else ("owner" if Config.WATERMARK_KEY else "default"),
-            "position": "user"
-            if self.user_dict.get("WATERMARK_POSITION")
-            else ("owner" if Config.WATERMARK_POSITION else "default"),
-            "size": "user"
-            if self.user_dict.get("WATERMARK_SIZE")
-            else ("owner" if Config.WATERMARK_SIZE else "default"),
-            "color": "user"
-            if self.user_dict.get("WATERMARK_COLOR")
-            else ("owner" if Config.WATERMARK_COLOR else "default"),
-            "font": "user"
-            if self.user_dict.get("WATERMARK_FONT")
-            else ("owner" if Config.WATERMARK_FONT else "default"),
-            "speed": "user"
-            if "WATERMARK_SPEED" in self.user_dict
-            else ("owner" if hasattr(Config, "WATERMARK_SPEED") else "default"),
+            "text": (
+                "user"
+                if self.user_dict.get("WATERMARK_KEY")
+                else ("owner" if Config.WATERMARK_KEY else "default")
+            ),
+            "position": (
+                "user"
+                if self.user_dict.get("WATERMARK_POSITION")
+                else ("owner" if Config.WATERMARK_POSITION else "default")
+            ),
+            "size": (
+                "user"
+                if self.user_dict.get("WATERMARK_SIZE")
+                else ("owner" if Config.WATERMARK_SIZE else "default")
+            ),
+            "color": (
+                "user"
+                if self.user_dict.get("WATERMARK_COLOR")
+                else ("owner" if Config.WATERMARK_COLOR else "default")
+            ),
+            "font": (
+                "user"
+                if self.user_dict.get("WATERMARK_FONT")
+                else ("owner" if Config.WATERMARK_FONT else "default")
+            ),
+            "speed": (
+                "user"
+                if "WATERMARK_SPEED" in self.user_dict
+                else ("owner" if hasattr(Config, "WATERMARK_SPEED") else "default")
+            ),
             # Quality is now controlled by WATERMARK_QUALITY parameter
             "maintain_quality": "default",
-            "opacity": "user"
-            if "WATERMARK_OPACITY" in self.user_dict
-            else ("owner" if hasattr(Config, "WATERMARK_OPACITY") else "default"),
+            "opacity": (
+                "user"
+                if "WATERMARK_OPACITY" in self.user_dict
+                else ("owner" if hasattr(Config, "WATERMARK_OPACITY") else "default")
+            ),
         }
 
         # Log detailed information about the sources of each setting at debug level

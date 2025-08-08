@@ -33,7 +33,7 @@ class AutoThumbnailHelper:
 
     @classmethod
     async def get_auto_thumbnail(
-        cls, filename: str, user_id: int | None = None
+        cls, filename: str, user_id: int | None = None, enabled: bool | None = None
     ) -> str | None:
         """
         Get auto thumbnail for a file based on its metadata
@@ -41,12 +41,16 @@ class AutoThumbnailHelper:
         Args:
             filename: The filename to extract metadata from
             user_id: User ID for cache organization (optional)
+            enabled: Override for auto thumbnail enabled status (optional)
 
         Returns:
             Path to downloaded thumbnail or None if not found
         """
         try:
-            if not Config.AUTO_THUMBNAIL:
+            # Use provided enabled parameter, otherwise fall back to config
+            auto_enabled = enabled if enabled is not None else Config.AUTO_THUMBNAIL
+
+            if not auto_enabled:
                 return None
 
             # Extract metadata from filename
@@ -143,6 +147,14 @@ class AutoThumbnailHelper:
             flags=re.IGNORECASE,
         )
 
+        # Remove common Telegram bot prefixes/suffixes (like @hello, @botname, etc.)
+        # Remove prefix patterns like "@word " at the beginning (more flexible)
+        title = re.sub(r"^@[\w\-\.]+\s+", "", title)
+        # Remove suffix patterns like " @word" at the end (more flexible)
+        title = re.sub(r"\s+@[\w\-\.]+$", "", title)
+        # Remove multiple @ patterns in case there are several
+        title = re.sub(r"@[\w\-\.]+", "", title)
+
         # Replace separators with spaces
         title = re.sub(r"[._-]+", " ", title)
 
@@ -213,6 +225,14 @@ class AutoThumbnailHelper:
     @classmethod
     def _extract_title_strategy_2(cls, title: str, _original: str) -> str:
         """Aggressive cleaning - remove all technical indicators"""
+        # Remove common Telegram bot prefixes/suffixes (like @hello, @botname, etc.)
+        # Remove prefix patterns like "@word " at the beginning (more flexible)
+        title = re.sub(r"^@[\w\-\.]+\s+", "", title)
+        # Remove suffix patterns like " @word" at the end (more flexible)
+        title = re.sub(r"\s+@[\w\-\.]+$", "", title)
+        # Remove multiple @ patterns in case there are several
+        title = re.sub(r"@[\w\-\.]+", "", title)
+
         # Replace separators
         title = re.sub(r"[._-]+", " ", title)
 
@@ -270,6 +290,14 @@ class AutoThumbnailHelper:
     @classmethod
     def _extract_title_strategy_3(cls, title: str, _original: str) -> str:
         """Anime-specific extraction"""
+        # Remove common Telegram bot prefixes/suffixes (like @hello, @botname, etc.)
+        # Remove prefix patterns like "@word " at the beginning (more flexible)
+        title = re.sub(r"^@[\w\-\.]+\s+", "", title)
+        # Remove suffix patterns like " @word" at the end (more flexible)
+        title = re.sub(r"\s+@[\w\-\.]+$", "", title)
+        # Remove multiple @ patterns in case there are several
+        title = re.sub(r"@[\w\-\.]+", "", title)
+
         # Replace separators
         title = re.sub(r"[._-]+", " ", title)
 
@@ -304,6 +332,14 @@ class AutoThumbnailHelper:
     @classmethod
     def _extract_title_strategy_4(cls, title: str, _original: str) -> str:
         """Word-by-word fallback strategy"""
+        # Remove common Telegram bot prefixes/suffixes (like @hello, @botname, etc.)
+        # Remove prefix patterns like "@word " at the beginning (more flexible)
+        title = re.sub(r"^@[\w\-\.]+\s+", "", title)
+        # Remove suffix patterns like " @word" at the end (more flexible)
+        title = re.sub(r"\s+@[\w\-\.]+$", "", title)
+        # Remove multiple @ patterns in case there are several
+        title = re.sub(r"@[\w\-\.]+", "", title)
+
         # Replace separators
         title = re.sub(r"[._-]+", " ", title)
         words = title.split()
@@ -393,6 +429,15 @@ class AutoThumbnailHelper:
         """Last resort title extraction"""
         # Just take the first few words before any obvious technical terms
         title = filename.rsplit(".", 1)[0] if "." in filename else filename
+
+        # Remove common Telegram bot prefixes/suffixes (like @hello, @botname, etc.)
+        # Remove prefix patterns like "@word " at the beginning (more flexible)
+        title = re.sub(r"^@[\w\-\.]+\s+", "", title)
+        # Remove suffix patterns like " @word" at the end (more flexible)
+        title = re.sub(r"\s+@[\w\-\.]+$", "", title)
+        # Remove multiple @ patterns in case there are several
+        title = re.sub(r"@[\w\-\.]+", "", title)
+
         title = re.sub(r"[._-]+", " ", title)
         words = title.split()[:4]  # Take first 4 words max
         return " ".join(words).strip()
@@ -957,6 +1002,13 @@ class AutoThumbnailHelper:
     ) -> str | None:
         """Enhanced TMDB thumbnail search with better result selection"""
         try:
+            # Convert year to int if it's a string
+            if year is not None and isinstance(year, str):
+                try:
+                    year = int(year)
+                except (ValueError, TypeError):
+                    year = None
+
             if is_tv_show:
                 result = await TMDBHelper.search_tv_show_enhanced(title, year)
             else:
@@ -1110,6 +1162,20 @@ class TMDBHelper:
     ) -> dict | None:
         """Enhanced movie search with better result selection"""
         try:
+            # Validate title input
+            if not title or not isinstance(title, str) or len(title.strip()) < 2:
+                LOGGER.warning(f"Invalid title for movie search: '{title}'")
+                return None
+
+            title = title.strip()
+
+            # Convert year to int if it's a string
+            if year is not None and isinstance(year, str):
+                try:
+                    year = int(year)
+                except (ValueError, TypeError):
+                    year = None
+
             # Try multiple search approaches
             search_results = []
 
@@ -1163,7 +1229,13 @@ class TMDBHelper:
             return None
 
         except Exception as e:
-            LOGGER.error(f"Error in enhanced movie search for '{title}': {e}")
+            # Better error logging to avoid showing "0" or empty errors
+            error_msg = str(e) if e else "Unknown error"
+            if not error_msg or error_msg.strip() in ["", "0"]:
+                error_msg = f"Empty or invalid error for title: '{title}'"
+            LOGGER.error(
+                f"Error in enhanced movie search for '{title}': {error_msg}"
+            )
             return await cls.search_movie(title, year)  # Fallback to basic search
 
     @classmethod
@@ -1172,6 +1244,20 @@ class TMDBHelper:
     ) -> dict | None:
         """Enhanced TV show search with better result selection"""
         try:
+            # Validate title input
+            if not title or not isinstance(title, str) or len(title.strip()) < 2:
+                LOGGER.warning(f"Invalid title for TV search: '{title}'")
+                return None
+
+            title = title.strip()
+
+            # Convert year to int if it's a string
+            if year is not None and isinstance(year, str):
+                try:
+                    year = int(year)
+                except (ValueError, TypeError):
+                    year = None
+
             # Try multiple search approaches
             search_results = []
 
@@ -1223,7 +1309,11 @@ class TMDBHelper:
             return None
 
         except Exception as e:
-            LOGGER.error(f"Error in enhanced TV search for '{title}': {e}")
+            # Better error logging to avoid showing "0" or empty errors
+            error_msg = str(e) if e else "Unknown error"
+            if not error_msg or error_msg.strip() in ["", "0"]:
+                error_msg = f"Empty or invalid error for title: '{title}'"
+            LOGGER.error(f"Error in enhanced TV search for '{title}': {error_msg}")
             return await cls.search_tv_show(title, year)  # Fallback to basic search
 
     @classmethod
@@ -1232,6 +1322,13 @@ class TMDBHelper:
         try:
             if not Config.TMDB_API_KEY:
                 return None
+
+            # Convert year to int if it's a string
+            if year is not None and isinstance(year, str):
+                try:
+                    year = int(year)
+                except (ValueError, TypeError):
+                    year = None
 
             params = {
                 "api_key": Config.TMDB_API_KEY,
@@ -1242,39 +1339,45 @@ class TMDBHelper:
                 ).lower(),
             }
 
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(
                     f"{cls.BASE_URL}/search/multi", params=params
-                ) as response:
-                    if response.status == 200:
-                        data = await response.json()
-                        if data.get("results"):
-                            # Filter and score results
-                            for result in data["results"]:
-                                media_type = result.get("media_type")
-                                if media_type in ["movie", "tv"]:
-                                    # Check year match if provided
-                                    if year:
-                                        result_year = None
-                                        if media_type == "movie":
-                                            release_date = result.get("release_date")
-                                            if release_date:
+                ) as response,
+            ):
+                if response.status == 200:
+                    data = await response.json()
+                    if data.get("results"):
+                        # Filter and score results
+                        for result in data["results"]:
+                            media_type = result.get("media_type")
+                            if media_type in ["movie", "tv"]:
+                                # Check year match if provided
+                                if year:
+                                    result_year = None
+                                    if media_type == "movie":
+                                        release_date = result.get("release_date")
+                                        if release_date and len(release_date) >= 4:
+                                            try:
                                                 result_year = int(release_date[:4])
-                                        elif media_type == "tv":
-                                            first_air_date = result.get(
-                                                "first_air_date"
-                                            )
-                                            if first_air_date:
-                                                result_year = int(first_air_date[:4])
-
-                                        # Allow ±2 years tolerance
+                                            except (ValueError, TypeError):
+                                                continue
+                                    elif media_type == "tv":
+                                        first_air_date = result.get("first_air_date")
                                         if (
-                                            result_year
-                                            and abs(result_year - year) <= 2
+                                            first_air_date
+                                            and len(first_air_date) >= 4
                                         ):
-                                            return result
-                                    else:
+                                            try:
+                                                result_year = int(first_air_date[:4])
+                                            except (ValueError, TypeError):
+                                                continue
+
+                                    # Allow ±2 years tolerance
+                                    if result_year and abs(result_year - year) <= 2:
                                         return result
+                                else:
+                                    return result
 
             return None
 
@@ -1341,8 +1444,9 @@ class TMDBHelper:
                 )
 
                 # Word overlap percentage
-                overlap_percentage = len(common_words) / max(
-                    len(search_words), len(result_words)
+                max_words = max(len(search_words), len(result_words))
+                overlap_percentage = (
+                    len(common_words) / max_words if max_words > 0 else 0
                 )
 
                 # Combined similarity score
@@ -1390,7 +1494,9 @@ class TMDBHelper:
             if original_language == "en":
                 score += 8
             # Bonus for Japanese content if anime detected
-            elif original_language == "ja" and cls._is_likely_anime(search_title):
+            elif original_language == "ja" and AutoThumbnailHelper._is_likely_anime(
+                search_title
+            ):
                 score += 12
 
         # Popularity validation (with stricter thresholds)
@@ -1701,6 +1807,14 @@ class TMDBHelper:
         # Remove file extensions
         title = re.sub(r"\.[a-zA-Z0-9]{2,4}$", "", title)
 
+        # Remove common Telegram bot prefixes/suffixes (like @hello, @botname, etc.)
+        # Remove prefix patterns like "@word " at the beginning (more flexible)
+        title = re.sub(r"^@[\w\-\.]+\s+", "", title)
+        # Remove suffix patterns like " @word" at the end (more flexible)
+        title = re.sub(r"\s+@[\w\-\.]+$", "", title)
+        # Remove multiple @ patterns in case there are several
+        title = re.sub(r"@[\w\-\.]+", "", title)
+
         # Replace dots, underscores, and dashes with spaces first
         title = re.sub(r"[._-]+", " ", title)
 
@@ -1791,6 +1905,10 @@ class TMDBHelper:
             # Strategy 1: Try with original filename (minimal cleaning)
             if original_title and original_title != title:
                 minimal_clean = re.sub(r"\.[a-zA-Z0-9]{2,4}$", "", original_title)
+                # Remove common Telegram bot prefixes/suffixes (more flexible)
+                minimal_clean = re.sub(r"^@[\w\-\.]+\s+", "", minimal_clean)
+                minimal_clean = re.sub(r"\s+@[\w\-\.]+$", "", minimal_clean)
+                minimal_clean = re.sub(r"@[\w\-\.]+", "", minimal_clean)
                 minimal_clean = re.sub(r"[._-]+", " ", minimal_clean).strip()
                 search_attempts.append(("original filename", minimal_clean))
 
@@ -1854,6 +1972,10 @@ class TMDBHelper:
             # Strategy 1: Try with original filename (minimal cleaning)
             if original_title and original_title != title:
                 minimal_clean = re.sub(r"\.[a-zA-Z0-9]{2,4}$", "", original_title)
+                # Remove common Telegram bot prefixes/suffixes (more flexible)
+                minimal_clean = re.sub(r"^@[\w\-\.]+\s+", "", minimal_clean)
+                minimal_clean = re.sub(r"\s+@[\w\-\.]+$", "", minimal_clean)
+                minimal_clean = re.sub(r"@[\w\-\.]+", "", minimal_clean)
                 minimal_clean = re.sub(r"[._-]+", " ", minimal_clean).strip()
                 search_attempts.append(("original filename", minimal_clean))
 
@@ -1911,7 +2033,7 @@ class TMDBHelper:
                 metadata = {}
 
             # Enhanced title extraction with multiple strategies
-            clean_title = cls._extract_clean_title(filename)
+            clean_title = AutoThumbnailHelper._extract_clean_title(filename)
             if clean_title:
                 metadata["title"] = clean_title
 
@@ -1922,9 +2044,9 @@ class TMDBHelper:
 
             # Enhanced media type detection
             if not metadata.get("type"):
-                if cls._detect_tv_patterns(filename):
+                if AutoThumbnailHelper._detect_tv_patterns(filename):
                     metadata["type"] = "tv"
-                elif cls._is_likely_anime(filename):
+                elif AutoThumbnailHelper._is_likely_anime(filename):
                     metadata["type"] = "anime"
                 else:
                     metadata["type"] = "movie"

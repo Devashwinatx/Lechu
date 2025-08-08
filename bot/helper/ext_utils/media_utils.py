@@ -9,6 +9,7 @@ from asyncio.subprocess import PIPE
 from os import path as ospath
 from pathlib import Path
 from re import compile, escape
+from re import match as re_match
 from re import search as re_search
 from time import time
 
@@ -389,6 +390,139 @@ async def get_media_info(path):
     return 0, None, None
 
 
+def _get_original_filename_for_media_detection(filename):
+    """
+    Get the original filename for media type detection.
+    For split files (e.g., movie.mkv.001, movie.mkv.002), returns the original filename (movie.mkv).
+    For regular files, returns the filename as-is.
+    """
+
+    # Check for split file patterns
+    # Pattern 1: filename.ext.001, filename.ext.002, etc.
+    match = re_match(r"(.+\.\w+)\.(\d{3})$", filename)
+    if match:
+        return match.group(1)  # Return filename.ext without the .001 part
+
+    # Pattern 2: filename.part001.ext, filename.part002.ext, etc.
+    match = re_match(r"(.+)\.part\d+(\.\w+)$", filename)
+    if match:
+        return f"{match.group(1)}{match.group(2)}"  # Return filename.ext without the .part001 part
+
+    # Pattern 3: filename.001, filename.002 (no extension before split number)
+    match = re_match(r"(.+)\.(\d{3})$", filename)
+    if match:
+        # This is trickier - we need to guess the original extension
+        # For now, return the base name and let the extension-based detection handle it
+        return match.group(1)
+
+    # Not a split file, return as-is
+    return filename
+
+
+async def _get_document_type_from_extension(filename):
+    """
+    Determine document type based on file extension.
+    Returns (is_video, is_audio, is_image) tuple.
+    """
+    is_video, is_audio, is_image = False, False, False
+
+    # Get file extension
+    file_ext = ospath.splitext(filename)[1].lower()
+
+    # Video extensions
+    video_extensions = {
+        ".mp4",
+        ".mkv",
+        ".avi",
+        ".mov",
+        ".wmv",
+        ".flv",
+        ".webm",
+        ".m4v",
+        ".3gp",
+        ".3g2",
+        ".asf",
+        ".rm",
+        ".rmvb",
+        ".vob",
+        ".ts",
+        ".mts",
+        ".m2ts",
+        ".divx",
+        ".xvid",
+        ".ogv",
+        ".f4v",
+        ".mpg",
+        ".mpeg",
+        ".m1v",
+        ".m2v",
+        ".mpe",
+        ".mpv",
+        ".mp2",
+        ".mpa",
+        ".mpg2",
+    }
+
+    # Audio extensions
+    audio_extensions = {
+        ".mp3",
+        ".flac",
+        ".wav",
+        ".aac",
+        ".ogg",
+        ".wma",
+        ".m4a",
+        ".opus",
+        ".ape",
+        ".ac3",
+        ".dts",
+        ".amr",
+        ".au",
+        ".ra",
+        ".aiff",
+        ".aif",
+        ".aifc",
+        ".caf",
+        ".sd2",
+        ".snd",
+        ".m1a",
+        ".m2a",
+    }
+
+    # Image extensions
+    image_extensions = {
+        ".jpg",
+        ".jpeg",
+        ".png",
+        ".gif",
+        ".bmp",
+        ".tiff",
+        ".tif",
+        ".webp",
+        ".svg",
+        ".ico",
+        ".psd",
+        ".raw",
+        ".cr2",
+        ".nef",
+        ".arw",
+        ".dng",
+        ".heic",
+        ".heif",
+        ".avif",
+        ".jxl",
+    }
+
+    if file_ext in video_extensions:
+        is_video = True
+    elif file_ext in audio_extensions:
+        is_audio = True
+    elif file_ext in image_extensions:
+        is_image = True
+
+    return is_video, is_audio, is_image
+
+
 async def get_document_type(path):
     is_video, is_audio, is_image = False, False, False
 
@@ -399,6 +533,13 @@ async def get_document_type(path):
         or re_search(r".+(\.|_)(rar|7z|zip|bin)(\.0*\d+)?$", path)
     ):
         return is_video, is_audio, is_image
+
+    # Handle split files specially - determine type from original filename
+    filename = ospath.basename(path)
+    original_filename = _get_original_filename_for_media_detection(filename)
+    if original_filename != filename:
+        # This is a split file, determine type from original extension
+        return await _get_document_type_from_extension(original_filename)
 
     # Check file extension for known types that might cause issues with Telegram
     file_ext = ospath.splitext(path)[1].lower()
@@ -8488,34 +8629,14 @@ class FFMpeg:
                 self._last_processed_bytes += await get_path_size(out_path)
 
             return True
-        # Use traditional file size-based splitting for non-equal splits
 
-        # Get the appropriate Telegram limit based on premium status
-        from bot.core.aeon_client import TgClient
-
-        # Use the MAX_SPLIT_SIZE from TgClient which is already set based on premium status
-        # This will be 4000 MiB for premium users and 2000 MiB for regular users
-        telegram_limit = TgClient.MAX_SPLIT_SIZE
-
-        # If split size is larger than Telegram's limit, reduce it with a safety margin
-        # Use a 20 MiB safety margin to ensure we never exceed Telegram's limit
-        safety_margin = 20 * 1024 * 1024  # 20 MiB
-        safe_telegram_limit = telegram_limit - safety_margin
-
-        if split_size > safe_telegram_limit:
-            telegram_limit / (1024 * 1024 * 1024)
-            safe_telegram_limit / (1024 * 1024 * 1024)
-            split_size = safe_telegram_limit
-
-        # Apply an additional safety buffer for multi-part files
-        if parts > 2:
-            buffer_size = 5000000  # 5MB additional buffer for multi-part files
-            split_size -= buffer_size
+        # Use traditional file size-based splitting (Old Aeon-MLTB proven approach)
+        # Apply the proven 3MB buffer from old implementation
+        split_size -= 3000000
         start_time = 0
         i = 1
         while i <= parts or start_time < duration - 4:
             out_path = f_path.replace(file_, f"{base_name}.part{i:03}{extension}")
-
             cmd = [
                 "xtra",  # Using xtra instead of ffmpeg
                 "-hide_banner",
@@ -8539,47 +8660,12 @@ class FFMpeg:
                 "-2",
                 "-c",
                 "copy",
+                "-threads",
+                f"{max(1, cpu_no // 2)}",
+                out_path,
             ]
-
-            # Add format-specific optimizations for Telegram compatibility
-            out_ext = os.path.splitext(out_path)[1].lower()
-            if out_ext == ".mp4":
-                # When using -c copy, we can only add container-level options, not encoding options
-                cmd.extend(
-                    [
-                        "-movflags",
-                        "+faststart",  # Streaming optimization
-                    ]
-                )
-            elif out_ext == ".mkv":
-                # When using -c copy, we can only add container-level options
-                cmd.extend(
-                    [
-                        "-disposition:v:0",
-                        "default",  # Set video as default
-                        "-disposition:a:0",
-                        "default",  # Set audio as default
-                    ]
-                )
-            elif out_ext == ".mov":
-                # When using -c copy, we can only add container-level options
-                cmd.extend(
-                    [
-                        "-movflags",
-                        "+faststart",  # Streaming optimization (MOV uses same structure as MP4)
-                    ]
-                )
-            # For other formats (.webm, etc.) and when using -c copy, no additional options needed
-
-            cmd.extend(
-                [
-                    "-threads",
-                    f"{max(1, cpu_no // 2)}",
-                    out_path,
-                ]
-            )
             if not multi_streams:
-                # Remove the mapping arguments (2 entries)
+                # Remove the mapping arguments (2 entries) - same as old implementation
                 del cmd[12]
                 del cmd[12]
             if self._listener.is_cancelled:
@@ -8595,7 +8681,6 @@ class FFMpeg:
             await self._ffmpeg_progress()
             _, stderr = await self._listener.subproc.communicate()
             code = self._listener.subproc.returncode
-
             if self._listener.is_cancelled:
                 return False
             if code == -9:
@@ -8606,41 +8691,24 @@ class FFMpeg:
                     stderr = stderr.decode().strip()
                 except Exception:
                     stderr = "Unable to decode the error!"
-                LOGGER.error(
-                    f"FFmpeg split failed for part {i}, code: {code}, error: {stderr}"
-                )
                 with contextlib.suppress(Exception):
                     await remove(out_path)
                 if multi_streams:
+                    LOGGER.warning(
+                        f"{stderr}. Retrying without map, -map 0 not working in all situations. Path: {f_path}",
+                    )
                     multi_streams = False
                     continue
+                LOGGER.warning(
+                    f"{stderr}. Unable to split this video, if it's size less than {self._listener.max_split_size} will be uploaded as it is. Path: {f_path}",
+                )
                 return False
-
             out_size = await aiopath.getsize(out_path)
-            # Check against both max_split_size and Telegram's limit (based on premium status)
-            from bot.core.aeon_client import TgClient
-
-            # Use the MAX_SPLIT_SIZE from TgClient which is already set based on premium status
-            telegram_limit = TgClient.MAX_SPLIT_SIZE
-            effective_limit = min(self._listener.max_split_size, telegram_limit)
-
-            if out_size > effective_limit:
-                # Calculate a more appropriate reduction based on the overage percentage
-                overage = out_size - effective_limit
-                overage_percent = overage / effective_limit
-
-                # More aggressive reduction for files that exceed Telegram's limit
-                if out_size > telegram_limit:
-                    # If we're over Telegram's limit, use a much larger buffer
-                    reduction = overage + 20000000  # 20MB extra buffer
-                    telegram_limit / (1024 * 1024 * 1024)
-                # Adjust reduction based on overage percentage
-                elif overage_percent > 0.2:  # If more than 20% over
-                    reduction = overage + 10000000  # 10MB extra buffer
-                else:
-                    reduction = overage + 5000000  # 5MB extra buffer
-
-                split_size -= reduction
+            if out_size > self._listener.max_split_size:
+                split_size -= (out_size - self._listener.max_split_size) + 5000000
+                LOGGER.warning(
+                    f"Part size is {out_size}. Trying again with lower split size!. Path: {f_path}",
+                )
                 await remove(out_path)
                 continue
             lpd = (await get_media_info(out_path))[0]
@@ -8650,6 +8718,9 @@ class FFMpeg:
                 )
                 break
             if duration == lpd:
+                LOGGER.warning(
+                    f"This file has been splitted with default stream and audio, so you will only see one part with less size from orginal one because it doesn't have all streams and audios. This happens mostly with MKV videos. Path: {f_path}",
+                )
                 break
             if lpd <= 3:
                 await remove(out_path)
@@ -8663,13 +8734,13 @@ class FFMpeg:
 
 
 async def apply_document_metadata(file_path, title=None, author=None, comment=None):
-    """Apply metadata to document files like PDF using appropriate tools.
+    """Apply metadata to document files like PDF using appropriate tools with template variable support.
 
     Args:
         file_path: Path to the document file
-        title: Title metadata to apply
-        author: Author metadata to apply
-        comment: Comment metadata to apply
+        title: Title metadata to apply (supports template variables)
+        author: Author metadata to apply (supports template variables)
+        comment: Comment metadata to apply (supports template variables)
 
     Returns:
         bool: True if metadata was successfully applied, False otherwise
@@ -8678,7 +8749,145 @@ async def apply_document_metadata(file_path, title=None, author=None, comment=No
         LOGGER.error(f"File not found: {file_path}")
         return False
 
-    # Skip if no metadata to apply
+    # Process template variables in metadata values
+    from bot.helper.ext_utils.template_processor import (
+        extract_metadata_from_filename,
+    )
+
+    # Extract file metadata for template variables
+    filename_without_ext = os.path.splitext(os.path.basename(file_path))[0]
+    file_metadata = await extract_metadata_from_filename(filename_without_ext)
+
+    # Add basic file information to metadata
+    file_metadata.update(
+        {
+            "filename": filename_without_ext,
+            "ext": (
+                os.path.splitext(file_path)[1][1:]
+                if os.path.splitext(file_path)[1]
+                else ""
+            ),
+            "filepath": file_path,
+            "basename": os.path.basename(file_path),
+        }
+    )
+
+    # Add additional template variables for comprehensive support
+    try:
+        import hashlib
+        import os
+
+        # Get file size
+        try:
+            file_size = os.path.getsize(file_path)
+            if file_size >= 1024**3:  # GB
+                size_str = f"{file_size / (1024**3):.2f}GB"
+            elif file_size >= 1024**2:  # MB
+                size_str = f"{file_size / (1024**2):.2f}MB"
+            elif file_size >= 1024:  # KB
+                size_str = f"{file_size / 1024:.2f}KB"
+            else:
+                size_str = f"{file_size}B"
+            file_metadata["size"] = size_str
+        except:
+            file_metadata["size"] = "Unknown"
+
+        # Get MD5 hash (first 8 characters for performance)
+        try:
+            with open(file_path, "rb") as f:
+                file_hash = hashlib.md5(f.read(8192)).hexdigest()[
+                    :8
+                ]  # Quick hash of first 8KB
+            file_metadata["md5_hash"] = file_hash
+            file_metadata["id"] = file_hash
+        except:
+            file_metadata["md5_hash"] = "Unknown"
+            file_metadata["id"] = "Unknown"
+
+        # Get media information if it's a media file
+        try:
+            duration, artist, title = await get_media_info(file_path)
+            if duration and duration > 0:
+                hours = duration // 3600
+                minutes = (duration % 3600) // 60
+                seconds = duration % 60
+                if hours > 0:
+                    duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+                else:
+                    duration_str = f"{minutes:02d}:{seconds:02d}"
+                file_metadata["duration"] = duration_str
+            else:
+                file_metadata["duration"] = ""
+        except:
+            file_metadata["duration"] = ""
+
+        # Set default values for media-specific variables
+        file_metadata.update(
+            {
+                "audios": "",
+                "audio_codecs": "",
+                "subtitles": "",
+                "NumVideos": "00",
+                "NumAudios": "00",
+                "NumSubtitles": "00",
+                "formate": file_metadata["ext"].upper()
+                if file_metadata["ext"]
+                else "",
+                "format": "Unknown",
+            }
+        )
+
+    except Exception as e:
+        LOGGER.warning(f"Error extracting additional metadata for {file_path}: {e}")
+        # Set default values if extraction fails
+        file_metadata.update(
+            {
+                "size": "Unknown",
+                "duration": "",
+                "audios": "",
+                "audio_codecs": "",
+                "subtitles": "",
+                "md5_hash": "Unknown",
+                "NumVideos": "00",
+                "NumAudios": "00",
+                "NumSubtitles": "00",
+                "formate": file_metadata["ext"].upper()
+                if file_metadata["ext"]
+                else "",
+                "format": "Unknown",
+                "id": "Unknown",
+            }
+        )
+
+    # Process template variables in metadata fields (simple substitution only)
+    async def process_metadata_template(template_value):
+        """Process template variables in metadata values - simple substitution only"""
+        if not template_value:
+            return template_value
+        try:
+            result = str(template_value)
+            # Simple template variable substitution using {variable} format
+            for key, value in file_metadata.items():
+                if value is not None:
+                    result = result.replace(f"{{{key}}}", str(value))
+            return result
+        except Exception as e:
+            LOGGER.warning(
+                f"Error processing metadata template '{template_value}': {e}"
+            )
+            return str(
+                template_value
+            )  # Return original value if template processing fails
+
+    # Process all metadata values through template processor
+    if title:
+        title = await process_metadata_template(title)
+    if author:
+        author = await process_metadata_template(author)
+    if comment:
+        comment = await process_metadata_template(comment)
+
+    # Skip if no metadata to apply after processing
     if not title and not author and not comment:
         return True
 

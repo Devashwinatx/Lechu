@@ -27,7 +27,16 @@ class DDLStatus:
         return MirrorStatus.STATUS_UPLOADING
 
     def name(self):
-        return self.__obj.name
+        ddl_name = self.__obj.name
+
+        # For operations where ddl name might be empty, use subname if available
+        if (
+            (not ddl_name or ddl_name.strip() == "")
+            and hasattr(self.listener, "subname")
+            and self.listener.subname
+        ):
+            return self.listener.subname
+        return ddl_name
 
     def progress(self):
         try:
@@ -62,6 +71,8 @@ class DDLStatus:
         """Cancel the DDL upload task"""
         if self.listener:
             self.listener.is_cancelled = True
-            await self.listener.on_upload_error("DDL upload cancelled by user!")
         if hasattr(self.__obj, "is_cancelled"):
             self.__obj.is_cancelled = True
+        # DDL upload doesn't have its own error handling, so we handle it here
+        if self.listener:
+            await self.listener.on_upload_error("DDL upload cancelled by user!")

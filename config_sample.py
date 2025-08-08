@@ -500,18 +500,11 @@ TMDB_REGION = "US"  # Region for TMDB results (e.g., US, GB, IN)
 # Cat API Settings
 CAT_API_KEY = ""  # The Cat API key from https://thecatapi.com/ (optional, but recommended for full features)
 
-# AI Settings
-DEFAULT_AI_PROVIDER = (
-    "mistral"  # Default AI provider for /ask command: mistral, deepseek
-)
-MISTRAL_API_URL = ""  # Custom Mistral AI API URL
-DEEPSEEK_API_URL = ""  # Custom DeepSeek AI API URL
-
 # Streamrip Settings
 STREAMRIP_ENABLED = True  # Enable/disable streamrip feature
 STREAMRIP_CONCURRENT_DOWNLOADS = 4  # Concurrent downloads per platform
 STREAMRIP_MAX_SEARCH_RESULTS = 20  # Search results limit
-STREAMRIP_ENABLE_DATABASE = True  # Enable download history tracking
+STREAMRIP_ENABLE_DATABASE = False  # Enable download history tracking
 STREAMRIP_AUTO_CONVERT = True  # Enable automatic format conversion
 
 # Streamrip Quality and Format Settings
@@ -531,7 +524,7 @@ STREAMRIP_QUALITY_FALLBACK_ENABLED = True  # Auto-fallback to lower quality
 
 # Streamrip Platform Settings
 STREAMRIP_QOBUZ_ENABLED = True  # Enable Qobuz downloads
-STREAMRIP_QOBUZ_QUALITY = 3  # Qobuz quality level (0-3)
+STREAMRIP_QOBUZ_QUALITY = 3  # Qobuz quality level (0-4: 0=320kbps, 1=16/44.1, 2=24/≤96, 3=24/≥96, 4=24/≥96)
 STREAMRIP_TIDAL_ENABLED = True  # Enable Tidal downloads
 STREAMRIP_TIDAL_QUALITY = 3  # Tidal quality level (0-3)
 STREAMRIP_DEEZER_ENABLED = True  # Enable Deezer downloads
@@ -1126,10 +1119,93 @@ BULK_ENABLED = True  # Enable/disable bulk operations (-b flag)
 
 # AI and Extra Modules
 # AI Settings
-AI_ENABLED = True  # Enable/disable AI functionality
-DEFAULT_AI_PROVIDER = "mistral"  # Default AI provider (mistral, deepseek)
+AI_ENABLED = True  # Master toggle for AI functionality
+
+# Default AI Model (replaces separate provider and model configs)
+DEFAULT_AI_MODEL = "gpt-4o-mini"  # Use most reliable model as default - All supported models: gpt-4o, gpt-4o-mini, gpt-4, gpt-3.5-turbo, o1-preview, o1-mini, claude-3.5-sonnet, claude-3-sonnet, claude-3-haiku, claude-3-opus, claude-2.1, gemini-1.5-pro, gemini-1.5-flash, gemini-2.0-flash-exp, mixtral-8x7b-32768, llama-3.1-70b-versatile, llama-3.1-8b-instant, llama2-70b-4096, vertex-gemini-1.5-pro, vertex-gemini-1.5-flash, vertex-claude-3-sonnet, vertex-claude-3-haiku, whisper-1, mistral, deepseek
+
+# GPT/OpenAI Settings
+OPENAI_API_KEY = ""  # OpenAI API key from https://platform.openai.com/api-keys
+OPENAI_API_URL = (
+    "https://api.openai.com/v1/chat/completions"  # Custom OpenAI API URL
+)
+OPENAI_MODELS = (
+    "gpt-3.5-turbo,gpt-4,gpt-4-turbo,gpt-4o,gpt-4o-mini,o1-preview,o1-mini"
+)
+
+# Claude/Anthropic Settings
+ANTHROPIC_API_KEY = ""  # Anthropic API key from https://console.anthropic.com/
+ANTHROPIC_API_URL = (
+    "https://api.anthropic.com/v1/messages"  # Custom Anthropic API URL
+)
+CLAUDE_MODELS = (
+    "claude-2.1,claude-3-haiku,claude-3-sonnet,claude-3.5-sonnet,claude-3-opus"
+)
+
+# Gemini/Google AI Settings
+GOOGLE_AI_API_KEY = (
+    ""  # Google AI API key from https://makersuite.google.com/app/apikey
+)
+GOOGLE_AI_API_URL = "https://generativelanguage.googleapis.com/v1beta/models"
+GEMINI_MODELS = "gemini-1.5-pro,gemini-1.5-flash,gemini-2.0-flash-exp"
+
+# Vertex AI Settings (Enterprise Google Cloud)
+VERTEX_PROJECT_ID = ""  # Google Cloud Project ID
+VERTEX_LOCATION = "us-central1"  # Vertex AI location
+VERTEX_MODELS = "gemini-1.5-pro,gemini-1.5-flash,claude-3-sonnet,claude-3-haiku"
+
+# Groq Settings (High-speed inference)
+GROQ_API_KEY = ""  # Groq API key from https://console.groq.com/keys
+GROQ_API_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_MODELS = (
+    "mixtral-8x7b-32768,llama2-70b-4096,llama-3.1-70b-versatile,llama-3.1-8b-instant"
+)
+
+
+# Legacy AI Settings (for backward compatibility)
 MISTRAL_API_URL = ""  # Mistral AI API URL
 DEEPSEEK_API_URL = ""  # DeepSeek AI API URL
+
+# AI Feature Settings
+AI_STREAMING_ENABLED = False  # Enable streaming responses (typewriter effect)
+AI_PLUGINS_ENABLED = True  # Enable plugin system (web search, URL summary, etc.)
+AI_MULTIMODAL_ENABLED = True  # Enable image/voice/document processing
+AI_CONVERSATION_HISTORY = True  # Enable conversation history per user
+AI_MAX_HISTORY_LENGTH = 50  # Maximum conversation history length
+AI_QUESTION_PREDICTION = True  # Enable follow-up question generation
+AI_GROUP_TOPIC_MODE = True  # Enable topic-based conversations in groups
+AI_INLINE_MODE_ENABLED = True  # Enable inline mode support (@bot mentions)
+AI_AUTO_LANGUAGE_DETECTION = True  # Auto-detect user language
+AI_DEFAULT_LANGUAGE = "en"  # Default language (en, zh, ru)
+
+# AI Plugin Settings
+AI_WEB_SEARCH_ENABLED = True  # Enable web search plugin
+AI_URL_SUMMARIZATION_ENABLED = True  # Enable URL summarization
+AI_ARXIV_ENABLED = True  # Enable ArXiv paper plugin
+AI_CODE_INTERPRETER_ENABLED = True  # Enable code execution
+AI_IMAGE_GENERATION_ENABLED = True  # Enable DALL-E image generation
+AI_VOICE_TRANSCRIPTION_ENABLED = True  # Enable Whisper voice transcription
+
+# New ChatGPT-Telegram-Bot Features
+AI_DOCUMENT_PROCESSING_ENABLED = True  # Enable document processing (PDF, text files)
+AI_FOLLOW_UP_QUESTIONS_ENABLED = (
+    True  # Enable automatic follow-up question generation
+)
+AI_CONVERSATION_EXPORT_ENABLED = True  # Enable conversation export functionality
+AI_TYPEWRITER_EFFECT_ENABLED = (
+    True  # Enable typewriter effect for streaming responses
+)
+AI_CONTEXT_PRUNING_ENABLED = True  # Enable intelligent context pruning
+
+# AI Performance Settings
+AI_MAX_TOKENS = 4096  # Maximum tokens per response
+AI_TEMPERATURE = 0.7  # Response creativity (0.0-2.0)
+AI_TIMEOUT = 60  # Request timeout in seconds
+AI_MAX_CONCURRENT_REQUESTS = 10  # Max concurrent AI requests
+AI_RATE_LIMIT_PER_USER = 50  # Max requests per user per hour
+
+# AI Model Grouping (format: "Group:model1,model2|Group2:model3,model4")
+AI_MODEL_GROUPS = "GPT:gpt-3.5-turbo,gpt-4,gpt-4o|Claude:claude-3-haiku,claude-3-sonnet|Gemini:gemini-1.5-pro,gemini-1.5-flash|Groq:mixtral-8x7b-32768,llama2-70b-4096|Others:mistral,deepseek"
 
 # Extra Module Settings
 IMDB_ENABLED = True  # Enable/disable IMDB functionality
@@ -1137,14 +1213,6 @@ TMDB_ENABLED = True  # Enable/disable TMDB functionality
 TRUECALLER_ENABLED = True  # Enable/disable Truecaller functionality
 ENCODING_ENABLED = True  # Enable/disable encoding functionality
 DECODING_ENABLED = True  # Enable/disable decoding functionality
-
-# VirusTotal Settings
-VT_API_KEY = ""  # VirusTotal API key for file scanning
-VT_API_TIMEOUT = 500  # VirusTotal API timeout in seconds
-VT_ENABLED = False  # Enable/disable VirusTotal functionality
-VT_MAX_FILE_SIZE = (
-    33554432  # Maximum file size for VirusTotal scanning in bytes (32MB)
-)
 
 # Enhanced NSFW Detection
 # Basic NSFW Settings

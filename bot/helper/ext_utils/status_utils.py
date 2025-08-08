@@ -304,16 +304,39 @@ async def get_readable_message(sid, is_user, page_no=1, status="All", page_step=
             task_msg += f"<b>{index + start_position}. {tstatus}: </b>"
         task_msg += f"[<code>{escape(task_name)}</code>]"
 
-        # Truncate subname if too long
+        # Truncate subname if too long, but avoid showing it twice
+        # Don't show subname if it's already being used as the main task name
         if (
             task.listener
             and hasattr(task.listener, "subname")
             and task.listener.subname
         ):
-            subname = task.listener.subname
-            if len(subname) > 40:
-                subname = subname[:37] + "..."
-            task_msg += f"\n<i>{subname}</i>"
+            # Get the original task name (before truncation) for better comparison
+            original_task_name = task.name()
+
+            # Check if subname is essentially the same as the task name
+            # This handles cases where task name comes from subname due to empty main name
+            subname_is_duplicate = (
+                task.listener.subname in (original_task_name, task_name)
+                or (
+                    len(original_task_name) > 50
+                    and task.listener.subname.startswith(original_task_name[:47])
+                )
+                or (
+                    len(task.listener.subname) > 50
+                    and original_task_name.startswith(task.listener.subname[:47])
+                )
+                or (
+                    len(task_name) > 47
+                    and task.listener.subname.startswith(task_name[:44])
+                )
+            )
+
+            if not subname_is_duplicate:
+                subname = task.listener.subname
+                if len(subname) > 40:
+                    subname = subname[:37] + "..."
+                task_msg += f"\n<i>{subname}</i>"
         if task.listener:
             task_msg += f"\nby <b>{source(task.listener)}</b>"
         else:

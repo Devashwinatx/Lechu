@@ -605,10 +605,20 @@ def parse_ffprobe_info(json_data, file_size, filename):
                 if not display_aspect_ratio:
                     # Calculate simple ratio
                     def gcd(a, b):
-                        return a if b == 0 else gcd(b, a % b)
+                        if b == 0:
+                            return a
+                        try:
+                            return gcd(b, a % b)
+                        except ZeroDivisionError:
+                            return a
 
                     divisor = gcd(width, height)
-                    display_aspect_ratio = f"{width // divisor}:{height // divisor}"
+                    if divisor > 0:
+                        display_aspect_ratio = (
+                            f"{width // divisor}:{height // divisor}"
+                        )
+                    else:
+                        display_aspect_ratio = f"{width}:{height}"
 
                 tc += f"{'Display aspect ratio':<28}: {display_aspect_ratio}\n"
 
@@ -1080,7 +1090,9 @@ async def gen_mediainfo(
 
     try:
         # Initialize the temporary download directory path (only used for downloads)
-        temp_download_path = "Mediainfo/"
+        # Use absolute path to avoid workdir mismatch issues with Pyrogram client
+        current_dir = os.getcwd()
+        temp_download_path = ospath.join(current_dir, "Mediainfo")
 
         # Initialize des_path to None
         des_path = None
@@ -1147,8 +1159,10 @@ async def gen_mediainfo(
                             LOGGER.error(
                                 f"Error creating directory with absolute path {abs_path}: {e2}"
                             )
-                            # Fall back to a different directory
-                            temp_download_path = "downloads/Mediainfo/"
+                            # Fall back to a different directory using absolute path
+                            temp_download_path = ospath.join(
+                                current_dir, "downloads", "Mediainfo"
+                            )
                             if not await aiopath.isdir(temp_download_path):
                                 try:
                                     await mkdir(temp_download_path)
@@ -1160,7 +1174,7 @@ async def gen_mediainfo(
                                         f"Error creating fallback directory {temp_download_path}: {e3}"
                                     )
                                     # Use current working directory as last resort
-                                    temp_download_path = "./"
+                                    temp_download_path = current_dir
                                     LOGGER.warning(
                                         f"Using current directory as fallback: {temp_download_path}"
                                     )
@@ -1207,16 +1221,14 @@ async def gen_mediainfo(
                         else f"mediainfo_{int(time())}"
                     )
 
-                # Clean filename of any problematic characters
-                filename = (
-                    filename.replace(" ", "_").replace("'", "").replace('"', "")
-                )
+                # Clean filename of any problematic characters (keep spaces for better readability)
+                filename = filename.replace("'", "").replace('"', "")
 
                 # Ensure we have a valid temp_download_path
                 if not temp_download_path:
-                    temp_download_path = "Mediainfo/"
+                    temp_download_path = ospath.join(current_dir, "Mediainfo")
                     LOGGER.warning(
-                        "temp_download_path was empty, using default: Mediainfo/"
+                        f"temp_download_path was empty, using default: {temp_download_path}"
                     )
 
                 des_path = ospath.join(temp_download_path, filename)
@@ -1412,9 +1424,8 @@ async def gen_mediainfo(
                 file_name = re.sub(
                     r'[<>:"|?*]', "_", file_name
                 )  # Replace Windows-forbidden characters
-                file_name = re.sub(
-                    r"\s+", "_", file_name
-                )  # Replace multiple spaces with single underscore
+                # Keep spaces in filename for better readability
+                # file_name = re.sub(r"\s+", "_", file_name)  # Commented out to preserve spaces
                 file_name = file_name.strip(
                     "._"
                 )  # Remove leading/trailing dots and underscores
@@ -1428,9 +1439,9 @@ async def gen_mediainfo(
 
                 # Ensure we have a valid temp_download_path
                 if not temp_download_path:
-                    temp_download_path = "Mediainfo/"
+                    temp_download_path = ospath.join(current_dir, "Mediainfo")
                     LOGGER.warning(
-                        "temp_download_path was empty, using default: Mediainfo/"
+                        f"temp_download_path was empty, using default: {temp_download_path}"
                     )
 
                 # Create des_path with error handling
@@ -1784,7 +1795,7 @@ async def gen_mediainfo(
 
         # If not a direct archive extension, check for split archive patterns
         if not is_archive:
-            # Check for split archive patterns
+            # Check for split archive patterns - be more specific to avoid false positives
             if (
                 re_search(
                     r"\.part0*[0-9]+\.rar$", filename
@@ -1795,49 +1806,93 @@ async def gen_mediainfo(
                 or re_search(
                     r"\.part0*[0-9]+\.7z$", filename
                 )  # Match .part1.7z, .part01.7z, etc.
-                or re_search(r"\.[0-9]{3}$", filename)  # Match .001, .002, etc.
-                or re_search(r"\.[0-9]{2}$", filename)  # Match .01, .02, etc.
-                or re_search(r"\.[0-9]$", filename)  # Match .1, .2, etc.
                 or re_search(r"\.r[0-9]+$", filename)  # Match .r00, .r01, etc.
                 or re_search(r"\.z[0-9]+$", filename)  # Match .z01, .z02, etc.
                 or re_search(r"\.zip\.[0-9]+$", filename)  # Match .zip.001, etc.
-                or re_search(r"\.rar\.[0-9]+$", filename)
-            ):  # Match .rar.001, etc.
-                # For numeric extensions (.001, .01, .1), verify it's actually an archive
-                if re_search(r"\.[0-9]+$", filename):
-                    try:
-                        # Use file command to verify it's an archive
-                        abs_path = ospath.abspath(des_path)
-                        cmd = ["file", "-b", abs_path]
-                        stdout, stderr, return_code = await cmd_exec(cmd)
-                        if return_code == 0 and stdout:
-                            if any(
-                                archive_type in stdout.lower()
-                                for archive_type in [
-                                    "zip",
-                                    "rar",
-                                    "7-zip",
-                                    "tar",
-                                    "gzip",
-                                    "bzip2",
-                                    "xz",
-                                    "iso",
-                                    "archive",
-                                    "data",
-                                ]
-                            ):
-                                is_split_archive = True
-                                is_archive = True
-                            else:
-                                pass
-                    except Exception:
-                        # Assume it's an archive if verification fails
-                        is_split_archive = True
-                        is_archive = True
-                else:
-                    # For non-numeric patterns, we're more confident it's an archive
-                    is_split_archive = True
-                    is_archive = True  # Always use file command to verify archive type, even for known extensions
+                or re_search(r"\.rar\.[0-9]+$", filename)  # Match .rar.001, etc.
+            ):
+                # For these specific patterns, we're confident it's an archive
+                is_split_archive = True
+                is_archive = True
+            elif (
+                re_search(r"\.[0-9]{3}$", filename)  # Match .001, .002, etc.
+                or re_search(r"\.[0-9]{2}$", filename)  # Match .01, .02, etc.
+                or re_search(r"\.[0-9]$", filename)  # Match .1, .2, etc.
+            ):
+                # For generic numeric extensions, we need to verify it's actually an archive
+                # This prevents false positives with split video files like .mkv.001
+                try:
+                    # Use file command to verify it's an archive
+                    abs_path = ospath.abspath(des_path)
+                    cmd = ["file", "-b", abs_path]
+                    # Add timeout to prevent hanging
+                    import asyncio
+
+                    stdout, stderr, return_code = await asyncio.wait_for(
+                        cmd_exec(cmd),
+                        timeout=10.0,  # 10 second timeout for file command
+                    )
+                    if return_code == 0 and stdout:
+                        stdout_lower = stdout.lower()
+                        # Check for archive types
+                        if any(
+                            archive_type in stdout_lower
+                            for archive_type in [
+                                "zip",
+                                "rar",
+                                "7-zip",
+                                "tar",
+                                "gzip",
+                                "bzip2",
+                                "xz",
+                                "iso",
+                                "archive",
+                            ]
+                        ):
+                            is_split_archive = True
+                            is_archive = True
+                        # Check for video/media types to explicitly exclude them
+                        elif any(
+                            media_type in stdout_lower
+                            for media_type in [
+                                "video",
+                                "audio",
+                                "media",
+                                "matroska",
+                                "mp4",
+                                "avi",
+                                "mkv",
+                                "webm",
+                                "mov",
+                                "flv",
+                                "wmv",
+                                "mpeg",
+                                "h.264",
+                                "h.265",
+                                "hevc",
+                            ]
+                        ):
+                            # This is definitely a media file, not an archive
+                            is_split_archive = False
+                            is_archive = False
+                        else:
+                            # If file command returns "data" or unknown, be conservative
+                            # and don't assume it's an archive
+                            is_split_archive = False
+                            is_archive = False
+                    else:
+                        # If file command fails, don't assume it's an archive
+                        # Let it be processed as a regular media file
+                        LOGGER.warning(
+                            f"file command failed for {filename}, treating as media file"
+                        )
+                        is_split_archive = False
+                        is_archive = False
+                except (Exception, TimeoutError):
+                    # If verification fails or times out, don't assume it's an archive
+                    # This prevents false positives with split video files
+                    is_split_archive = False
+                    is_archive = False  # Always use file command to verify archive type, even for known extensions
         # This provides more accurate information and handles cases where extensions don't match content
         try:
             # Verify file exists before running file command
@@ -2102,7 +2157,7 @@ async def gen_mediainfo(
                                     if size_match:
                                         uncompressed_size = int(size_match.group(1))
 
-                        if uncompressed_size > 0:
+                        if uncompressed_size > 0 and file_size > 0:
                             # Calculate compression ratio
                             ratio = uncompressed_size / file_size
                             tc += f"{'Compression ratio':<28}: {ratio:.2f}:1\n"
@@ -2741,7 +2796,21 @@ async def gen_mediainfo(
             des_path,
         ]
 
-        stdout, stderr, return_code = await cmd_exec(cmd)
+        # Add timeout to prevent ffprobe from hanging on problematic files
+        try:
+            import asyncio
+
+            stdout, stderr, return_code = await asyncio.wait_for(
+                cmd_exec(cmd),
+                timeout=60.0,  # 60 second timeout
+            )
+        except TimeoutError:
+            LOGGER.warning(
+                f"ffprobe timed out for {des_path}, trying mediainfo fallback"
+            )
+            return_code = 1  # Set to failure to trigger fallback
+            stderr = "ffprobe timed out after 60 seconds"
+            stdout = ""
 
         if return_code != 0:
             LOGGER.warning(
@@ -2831,13 +2900,22 @@ async def gen_mediainfo(
                         temp_send, "ffprobe failed, trying mediainfo binary..."
                     )
 
-                # Try mediainfo binary
+                # Try mediainfo binary with timeout
                 mediainfo_cmd = ["mediainfo", des_path]
-                (
-                    mediainfo_stdout,
-                    mediainfo_stderr,
-                    mediainfo_return_code,
-                ) = await cmd_exec(mediainfo_cmd)
+                try:
+                    (
+                        mediainfo_stdout,
+                        mediainfo_stderr,
+                        mediainfo_return_code,
+                    ) = await asyncio.wait_for(
+                        cmd_exec(mediainfo_cmd),
+                        timeout=30.0,  # 30 second timeout for mediainfo
+                    )
+                except TimeoutError:
+                    LOGGER.warning(f"mediainfo binary timed out for {des_path}")
+                    mediainfo_return_code = 1
+                    mediainfo_stderr = "mediainfo timed out after 30 seconds"
+                    mediainfo_stdout = ""
 
                 if mediainfo_return_code == 0 and mediainfo_stdout:
                     LOGGER.info(f"mediainfo binary succeeded for {des_path}")
@@ -3047,11 +3125,7 @@ async def gen_mediainfo(
         LOGGER.error(f"MediaInfo error: {error_message}")
 
         # Clean up any temporary files on error
-        if (
-            des_path
-            and isinstance(des_path, str)
-            and (des_path.startswith("Mediainfo/") or "Mediainfo/" in des_path)
-        ):
+        if des_path and isinstance(des_path, str) and ("Mediainfo" in des_path):
             try:
                 if await aiopath.exists(des_path):
                     await aioremove(des_path)
@@ -3106,10 +3180,8 @@ async def gen_mediainfo(
             and await aiopath.exists(des_path)
             and des_path != media_path
         ):
-            # Only delete files in the Mediainfo/ directory (temporary downloads)
-            if isinstance(des_path, str) and (
-                des_path.startswith("Mediainfo/") or "Mediainfo/" in des_path
-            ):
+            # Only delete files in the Mediainfo directory (temporary downloads)
+            if isinstance(des_path, str) and ("Mediainfo" in des_path):
                 await aioremove(des_path)
             else:
                 pass
