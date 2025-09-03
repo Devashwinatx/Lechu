@@ -1,11 +1,11 @@
 # REQUIRED CONFIG
 BOT_TOKEN = ""
 OWNER_ID = 0
-TELEGRAM_API = 0
-TELEGRAM_HASH = ""
+TELEGRAM_API = 28015531
+TELEGRAM_HASH = "2ab4ba37fd5d9ebf1353328fc915ad28"
 
 # Recommended for persisting settings, RSS feeds, and task history. Essential for some features.
-DATABASE_URL = ""
+DATABASE_URL = "mongodb+srv://sivanesh:9488128178siva@cluster02.uyxp6bz.mongodb.net/?retryWrites=true&w=majority&appName=cluster02"
 
 # OPTIONAL CONFIG
 TG_PROXY = {}  # Example: {"scheme": "socks5", "hostname": "11.22.33.44", "port": 1234, "username": "user", "password": "pass"}
